@@ -1,0 +1,9 @@
+{
+  "plugins": ["babel-plugin-add-module-exports",
+    "@babel/plugin-proposal-class-properties"],
+  "env": {
+    "test": {
+      "plugins": ["transform-es2015-modules-commonjs"]
+    }
+  }
+}
