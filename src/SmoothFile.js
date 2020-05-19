@@ -7,12 +7,22 @@ class SmoothFile {
     this.preamble = ''
     this.title = ''
     this.firestore = {}
+    this.faces = {}
+    this.initialFace = ''
     if (state) {
       this.text = state.text || ''
       this.preamble = state.preamble || ''
 
-      this.lines = this.text.split(/\r?\n/)
-      this.lines.splice(0, 0, '\n') // make line indexes start at 1 (can't get Prism to start at 0)
+      this.lines = []
+
+      if (this.text.length) {
+        this.lines = this.text.split(/\r?\n/)
+        // Warning: dirty hack (can't get Prism to start at line 0)
+        // Only do this when we have at least one line so we don't
+        // alqays create an empty line.
+        this.lines.splice(0, 0, '\n')
+      }
+
       // Parse the preamble seperately so we can figure out the ids
       // that come from there, and also to preserve the line numbers
       // of the original text
@@ -30,6 +40,8 @@ class SmoothFile {
       // We don't parse the faces completely here, but we maintain the dictionary as
       // it was initialized.
       this.parseFaces()
+
+      this.getInitialFace()
 
       this.firestore = state.firestore || {}
     }
@@ -80,6 +92,15 @@ class SmoothFile {
     var allLines = this.preambleLines.concat(this.lines)
     this.faces = SmoothFile.getFacesInLines(allLines)
     return this.faces
+  }
+  getInitialFace (lines) {
+    for (var i = 0; i < this.lines.length; ++i) {
+      var match = SmoothSyntax.faceWithStringArg.exec(this.lines[i])
+      if (match) {
+        this.initialFace = match[1]
+        return
+      }
+    }
   }
   parseFunctions (lines) {
     this.functions = []

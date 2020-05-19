@@ -12,11 +12,14 @@ const SmoothSyntax = {
   escapedExpressionPrism: /{{(.*?)}}/,
   number: /^[-]?\d+(\.\d+)?/,
   // These functions require a single quoted string as arg
-  title: /^\s*title\s*\(\s*"(.*)"\)/,
-  label: /^\s*label\s*\(\s*"(.*)"\)/,
+  title: /^\s*title\s*\(\s*"(.*)"\s*\)/,
+  label: /^\s*label\s*\(\s*"(.*)"\s*\)/,
+  // face doesn't require a string arg, but we look for it when guessing
+  // at the first face to download.
+  faceWithStringArg: /^\s*face\s*\(\s*"(.*)"\s*\)/,
   // Multiple quoted strings as args
-  createFaces: /^\s*create_face\s*\(\s*(".*"\s*,\s*".*")\)/,
+  createFaces: /^\s*create_face\s*\(\s*(".*"\s*,\s*".*")\s*\)/,
   function: /^\s*function\s*\(\s*"([^"]*)"/,
-  macro: /^(rand|length|not)\s*\(\s*(\S*)\s*\)/
+  macro: /^(rand|length|not|isNaN|int)\s*\(\s*(\S*)\s*\)/
 }
 export default SmoothSyntax

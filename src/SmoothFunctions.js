@@ -2,7 +2,6 @@ import SmoothExpressions from './SmoothExpressions'
 import SmoothHelper from './SmoothHelper'
 import SmoothSyntax from './SmoothSyntax'
 import SmoothOptions from './SmoothOptions'
-import SmoothContext from './SmoothContext'
 
 // A custom error class for syntax errors that we can
 // detect without evaluating the context.  These can then
@@ -49,6 +48,8 @@ const SmoothFunctions = {
     }
     return SmoothFunctions.currentPromise
   },
+  // create_face is called from the preamble...and MUST return immediately
+  // You can't wait for the face to download here.
   _create_face: (context, face) => {
     context.faces[face.id] = {
       apng: face.apng,
@@ -56,21 +57,47 @@ const SmoothFunctions = {
       name: face.name
     }
     context.faceNameToId[face.name] = face.id
-
     var onError = () => {
       throw new Error('Could not load face: ' + face.id)
     }
-    if (!context.currentFaceId) {
-      context.currentFaceId = face.id
-      context.predefinedVariables.CURRENT_FACE = face.name
+
+    var initialFace = context.initialFace
+    // Wait for this command if we are downloading the "initial face" which is the first one
+    // to be used as a quotes argument. Otherwise, just start downloading it but don't do anything
+    // else.
+    // If you have a lot of faces, ideally, one of the first create_face commands would be the
+    // initial face, otherwise there may be a lot of current downloads by the time we start
+    // waiting for the result.
+    var bWaitForLoad = (!context.currentFaceId && initialFace === '') || // No intial face was set and this is the first
+      (initialFace in context.faceNameToId && face.name === initialFace) // This is the initial face
+    if (bWaitForLoad) {
+      return new Promise((resolve, reject) => {
+        var doneLoading = () => {
+          context.currentFaceId = face.id
+          context.predefinedVariables.CURRENT_FACE = face.name
+          if (face.name in context.voices) {
+            context.faceVoice = context.voices[face.name]
+          }
+          resolve({line: context.lineNumber + 1})
+        }
+        var onWaitLoaded = () => {
+          context.emitEvent('faceId', face.id)
+          // Setting timeout to make sure we have time to complete loading the face
+          // prior to making it animate.
+          setTimeout(() => {
+            doneLoading()
+          }, 0)
+        }
+        if (context.evaluationOptions.unattended) {
+          doneLoading()
+        } else {
+          context.emitEvent('requestFace', {id: face.id, apng: face.apng, thumb: face.thumb, onLoaded: onWaitLoaded, onError: onError})
+        }
+      })
+    } else {
+      context.emitEvent('requestFace', {id: face.id, apng: face.apng, thumb: face.thumb, onLoaded: null, onError: onError})
+      return Promise.resolve({line: context.lineNumber + 1})
     }
-    var onLoaded = () => {
-      if (face.id === context.currentFaceId) {
-        SmoothContext.eventEmitter.emit('faceId', face.id)
-      }
-    }
-    SmoothContext.eventEmitter.emit('requestFace', {id: face.id, apng: face.apng, thumb: face.thumb, onLoaded: onLoaded, onError: onError})
-    return Promise.resolve({line: context.lineNumber + 1})
   },
   _create_voice: (context, argArray) => {
     var stringArgs = []
@@ -111,70 +138,74 @@ const SmoothFunctions = {
     return Promise.resolve({line: context.lineNumber + 1})
   },
   _face: (context, argArray) => {
-    if (argArray.length === 0) {
-      context.currentFaceId = null
-      SmoothContext.eventEmitter.emit('faceId', null)
-      context.faceVoice = null
-      return new Promise((resolve, reject) => {
-        // Setting timeout to make sure we have time to complete loading the face
-        // prior to making it animate.
-        setTimeout(() => {
-          resolve({line: context.lineNumber + 1})
-        }, 0)
-      })
-    }
-    if (argArray.length !== 1) {
-      throw new SmoothSyntaxError('Expected zero or one arguments to face.')
-    } else {
-      var namedFace = argArray[0]
-      if (!(namedFace in context.faceNameToId)) {
-        throw new Error('Unknown named face: ' + namedFace + '.')
-      }
-      if (!context.faceNameToId[namedFace]) {
-        throw new Error('context.faceNameToId has null entry for ' + namedFace)
-      }
-      var faceid = context.faceNameToId[namedFace]
-      if (!(faceid in context.faces)) {
-        throw new Error(faceid + ' not present in context.faces')
-      }
-      var face = context.faces[faceid]
-      return new Promise((resolve, reject) => {
-        var onError = () => {
-          reject(new Error('Could not load face: ' + faceid))
-        }
-        var onLoaded = () => {
-          if (namedFace in context.voices) {
-            context.faceVoice = context.voices[namedFace]
-          }
-          context.predefinedVariables.CURRENT_FACE = namedFace
-          context.currentFaceId = faceid
-          SmoothContext.eventEmitter.emit('faceId', faceid)
+    return context.outputHTML().then(() => {
+      if (argArray.length === 0) {
+        return new Promise((resolve, reject) => {
+          context.currentFaceId = null
+          context.emitEvent('faceId', null)
+          context.faceVoice = null
           // Setting timeout to make sure we have time to complete loading the face
           // prior to making it animate.
           setTimeout(() => {
             resolve({line: context.lineNumber + 1})
           }, 0)
-        }
-        // Request the face so that we get a callback when it is ready.
-        // It should have already been requested with create_face
-        SmoothContext.eventEmitter.emit('requestFace', {id: faceid, apng: face.apng, thumb: face.thumb, onLoaded: onLoaded, onError: onError})
-      })
-    }
+        })
+      }
+      if (argArray.length !== 1) {
+        throw new SmoothSyntaxError('Expected zero or one arguments to face.')
+      } else {
+        return new Promise((resolve, reject) => {
+          var namedFace = argArray[0]
+          if (!(namedFace in context.faceNameToId)) {
+            throw new Error('Unknown named face: ' + namedFace + '.')
+          }
+          if (!context.faceNameToId[namedFace]) {
+            throw new Error('context.faceNameToId has null entry for ' + namedFace)
+          }
+          var faceid = context.faceNameToId[namedFace]
+          if (!(faceid in context.faces)) {
+            throw new Error(faceid + ' not present in context.faces')
+          }
+          var face = context.faces[faceid]
+          var onError = () => {
+            reject(new Error('Could not load face: ' + faceid))
+          }
+          var onLoaded = () => {
+            if (namedFace in context.voices) {
+              context.faceVoice = context.voices[namedFace]
+            }
+            context.predefinedVariables.CURRENT_FACE = namedFace
+            context.currentFaceId = faceid
+            context.emitEvent('faceId', faceid)
+            // Setting timeout to make sure we have time to complete loading the face
+            // prior to making it animate.
+            setTimeout(() => {
+              resolve({line: context.lineNumber + 1})
+            }, 0)
+          }
+          // Request the face so that we get a callback when it is ready.
+          // It should have already been requested with create_face
+          context.emitEvent('requestFace', {id: faceid, apng: face.apng, thumb: face.thumb, onLoaded: onLoaded, onError: onError})
+        })
+      }
+    })
   },
   _voice: (context, argArray) => {
-    if (argArray.length === 1) {
-      var voiceName = argArray[0]
-      if (voiceName in context.voices) {
-        context.voice = context.voices[voiceName]
+    return context.outputHTML().then(() => {
+      if (argArray.length === 1) {
+        var voiceName = argArray[0]
+        if (voiceName in context.voices) {
+          context.voice = context.voices[voiceName]
+        } else {
+          throw new Error('unknown voice: ' + voiceName)
+        }
+      } else if (argArray.length === 0) {
+        context.voice = null
       } else {
-        throw new Error('unknown voice: ' + voiceName)
+        throw new SmoothSyntaxError('Expected zero or one argument to voice.')
       }
-    } else if (argArray.length === 0) {
-      context.voice = null
-    } else {
-      throw new SmoothSyntaxError('Expected zero or one argument to voice.')
-    }
-    return Promise.resolve({line: context.lineNumber + 1})
+      return Promise.resolve({line: context.lineNumber + 1})
+    })
   },
   _title: (context, argArray) => {
     // Handled in SmoothFile construction
@@ -188,16 +219,24 @@ const SmoothFunctions = {
     return Promise.resolve({line: context.lineNumber + 1})
   },
   _option: (context, argArray) => {
-    var optionDict = SmoothHelper.getOptionTextDict(context, context.lineNumber)
-    var optionLinestrings = Object.keys(optionDict)
-    var options = new SmoothOptions()
-    for (var i = 0; i < optionLinestrings.length; ++i) {
-      var optionText = optionDict[optionLinestrings[i]]
-      var lineNumber = parseInt(optionLinestrings[i])
-      options.addOption(optionText, lineNumber + 1)
-    }
-    context.setOptions(options)
-    return options.promise
+    return context.outputHTML().then(() => {
+      if (argArray.length === 0) {
+        throw new SmoothSyntaxError('Expected at least one argument to option')
+      }
+      var optionDict = SmoothHelper.getOptionTextDict(context, context.lineNumber)
+      var optionLinestrings = Object.keys(optionDict)
+      var options = new SmoothOptions()
+      for (var i = 0; i < optionLinestrings.length; ++i) {
+        var optionText = optionDict[optionLinestrings[i]]
+        var lineNumber = parseInt(optionLinestrings[i])
+        options.addOption(optionText, lineNumber + 1)
+      }
+      context.setOptions(options)
+      if (context.evaluationOptions.unattended) {
+        return Promise.resolve({options: optionDict})
+      }
+      return options.promise
+    })
   },
   _if: (context, argArray) => {
     if (argArray.length !== 1) {
@@ -257,7 +296,13 @@ const SmoothFunctions = {
     if (varname.length === 0) {
       throw new SmoothSyntaxError('Expected variable name')
     }
-    if (SmoothSyntax.variableName.exec(varname) == null) {
+    if (varname.length && varname[0] === '"') {
+      throw new SmoothSyntaxError('variable name must not be enclosed in quotes')
+    }
+    varname = SmoothExpressions.replaceEscapedExpressions(context, varname)
+
+    var match = SmoothSyntax.variableName.exec(varname)
+    if (match == null || match[0].length !== varname.length) {
       throw new SmoothSyntaxError('Invalid variable name: ' + varname + '.  Use only a-zA-Z_0-9 and start with a-zA-Z')
     }
     var replacedVariables = SmoothExpressions.replaceEscapedExpressions(context, stringArray[1])
@@ -281,23 +326,25 @@ const SmoothFunctions = {
     return Promise.resolve({line: context.getLabels()[labelName]})
   },
   _delay: (context, args) => {
-    if (args.length !== 1) {
-      throw new SmoothSyntaxError('Expected one argument to delay')
-    }
-    var delay = parseInt(args[0])
-    if (isNaN(delay)) {
-      throw new SmoothSyntaxError('Expected integer argument to delay')
-    }
-    return new Promise((resolve, reject) => {
-      setTimeout(
-        () => {
-          resolve({line: context.lineNumber + 1})
-        }, delay
-      )
+    return context.outputHTML().then(() => {
+      if (args.length !== 1) {
+        throw new SmoothSyntaxError('Expected one argument to delay')
+      }
+      var delay = parseInt(args[0])
+      if (isNaN(delay)) {
+        throw new SmoothSyntaxError('Expected integer argument to delay')
+      }
+      return new Promise((resolve, reject) => {
+        setTimeout(
+          () => {
+            resolve({line: context.lineNumber + 1})
+          }, delay
+        )
+      })
     })
   },
   _clear: (context, args) => {
-    SmoothContext.eventEmitter.emit('clearHTML')
+    context.emitEvent('clearHTML')
     return Promise.resolve({line: context.lineNumber + 1})
   },
   // Currently, _function can be executed twice for a given line.  Once as part of
@@ -330,7 +377,7 @@ const SmoothFunctions = {
         if (SmoothSyntax.variableName.exec(argStringArray[i]) == null) {
           throw new SmoothSyntaxError('invalid variable name: ' + argStringArray[i])
         }
-        // Prevent errors when bIsTestingForErrors
+        // Prevent errors when we are testing for syntax errors
         context.variables[argStringArray[i]] = ''
 
         func.args.push(argStringArray[i])
@@ -341,9 +388,9 @@ const SmoothFunctions = {
     return Promise.resolve({line: functionEnd + 1})
   },
   _end: (context, args) => {
-    if (context.bIsTestingForErrors) {
-      return
-    }
+    // if (context.bIsTestingForErrors) {
+    //  return
+    // }
     if (context.functionReturns.length === 0) {
       throw new Error('Unexpected end of function.  No function call to return to.')
     }

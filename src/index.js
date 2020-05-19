@@ -5,4 +5,5 @@ import SmoothFunctions from './SmoothFunctions'
 import SmoothHelper from './SmoothHelper'
 import SmoothOptions from './SmoothOptions'
 import SmoothSyntax from './SmoothSyntax'
-export {SmoothContext, SmoothExpressions, SmoothFile, SmoothFunctions, SmoothHelper, SmoothOptions, SmoothSyntax}
+import SmoothTest from './SmoothTest'
+export {SmoothContext, SmoothExpressions, SmoothFile, SmoothFunctions, SmoothHelper, SmoothOptions, SmoothSyntax, SmoothTest}

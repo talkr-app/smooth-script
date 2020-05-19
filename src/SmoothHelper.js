@@ -64,12 +64,13 @@ const SmoothHelper = {
   },
   getOptions: function (context, lineNumber) {
     var lines = context.getLines()
-    if (lineNumber > lines.length - 2) {
+    if (lineNumber >= lines.length) {
       throw new Error('Unexpected end to story looking for option')
     }
     var original = this.getIndent(lines[lineNumber])
     var optionLines = []
     var nextLineAfterBlock = lineNumber
+
     while (nextLineAfterBlock < lines.length) {
       var indent = this.getIndent(lines[nextLineAfterBlock])
       if (indent < original) {
@@ -77,7 +78,6 @@ const SmoothHelper = {
       }
       if (indent === original) {
         if (SmoothSyntax.optionFunction.exec(lines[nextLineAfterBlock]) === null) {
-          context.lineNumber = nextLineAfterBlock
           // in this case, there is only a single option.
           return optionLines
         } else {

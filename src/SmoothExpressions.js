@@ -43,6 +43,7 @@ const SmoothExpressions = {
     }
   },
   'macros': { // single-argument functions
+    // Add to SmoothSyntax macro regex when adding a new one
     'rand': (max) => {
       // return a random integer less than the arg specified (or 0)
       return Math.floor(Math.random() * Math.floor(max))
@@ -55,6 +56,12 @@ const SmoothExpressions = {
     },
     'not': (bool) => {
       return !bool
+    },
+    'isNaN': (str) => {
+      return isNaN(str)
+    },
+    'int': (str) => {
+      return parseInt(str)
     }
   },
   // take a string starting with an open parenthesis, returns only the part of the string up until the matching ending parenthesis
@@ -132,9 +139,13 @@ const SmoothExpressions = {
     }
     if (expression[0] === '(') {
       // Parenthesis
-      var subExpression = this.getParenthesisExpression(expression)
-      var value = this.evaluate(context, subExpression)
-      return {value: value, remainder: expression.substring(subExpression.length + 2).trim()}
+      try {
+        var subExpression = this.getParenthesisExpression(expression)
+        var value = this.evaluate(context, subExpression)
+        return {value: value, remainder: expression.substring(subExpression.length + 2).trim()}
+      } catch (error) {
+        throw new Error('Parenthesis error on line: ' + context.lineNumber)
+      }
     } else if (expression[0] === '"') {
       // strings
       var str = this.getQuotedString(expression)
@@ -152,13 +163,12 @@ const SmoothExpressions = {
     } else if ((m = SmoothSyntax.variableName.exec(expression)) !== null) {
       // Variables
       if (this.bIsVariable(m[0], context)) {
-        return { value: this.evaluateVariable(m[0], context), remainder: expression.substring(m[0].length).trim() }
-      } else {
-        if (!context.bIsTestingForErrors) {
-          throw new Error('Undefined variable: ' + m[0])
-        } else {
-          return { value: 0, remainder: expression.substring(m[0].length).trim() }
+        if (context.evaluationOptions.evaluateVariables) {
+          return { value: this.evaluateVariable(m[0], context), remainder: expression.substring(m[0].length).trim() }
         }
+        return { value: 0, remainder: expression.substring(m[0].length).trim() }
+      } else {
+        throw new Error('Undefined variable: ' + m[0])
       }
     }
     throw new Error('Unknown expression value: ' + expression)
@@ -170,7 +180,6 @@ const SmoothExpressions = {
     } else if (str[0] in this.operations) {
       return str[0]
     }
-    console.error(str)
     throw new Error('Expected operator')
   },
   getArgStringArray (string) {
